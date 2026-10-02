@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Домино</title>
+<style>
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+body { margin: 0; padding: 4px; font-family: -apple-system, sans-serif;
+  background: #1e5c2e; color: #fff; display: flex; flex-direction: column;
+  min-height: 100vh; user-select: none; overflow: hidden; }
+h1 { text-align: center; font-size: 16px; margin: 2px 0; }
+.top-bar { display: flex; justify-content: space-between; font-size: 12px;
+  padding: 2px 6px; color: #cfe8cf; }
+.top-bar .round { font-weight: bold; color: #ffd700; }
+.board-wrap { background: #174a24; border: 2px solid #0d3018; border-radius: 10px;
+  margin: 3px 0; position: relative; overflow: hidden;
+  height: 38vh; min-height: 130px; max-height: 38vh; }
+.board { position: absolute; inset: 0; }
+.board-empty { position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%,-50%); color: #8fbc8f; font-size: 13px;
+  text-align: center; width: 90%; }
+.status { text-align: center; font-size: 13px; padding: 2px;
+  min-height: 18px; color: #d4edda; }
+.ai-info { text-align: center; font-size: 11px; color: #a8d5a8; margin-bottom: 2px; }
+.btn-row { display: flex; justify-content: center; gap: 5px; margin: 3px 0; }
+.btn { background: #2d7a3e; color: #fff; border: 1px solid #1a5028;
+  border-radius: 8px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+.btn:active { background: #246030; }
+.btn.gold { background: #b8860b; border-color: #8a6508; }
+.btn:disabled { opacity: 0.35; }
+.hand { display: flex; flex-wrap: wrap; justify-content: center;
+  gap: 3px; padding: 2px 0; height: 88px; overflow-y: auto;
+  align-content: flex-start; }
+.tile { width: 42px; height: 68px; background: #f8f8f0; border-radius: 5px;
+  border: 1px solid #999; box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  display: flex; flex-direction: column; padding: 2px; cursor: pointer;
+  position: relative; transition: transform 0.15s, opacity 0.3s; }
+.tile .half { flex: 1; position: relative; border-radius: 3px; }
+.tile .half.top { border-bottom: 1px solid #ccc; }
+.tile.disabled { opacity: 0.3; filter: grayscale(0.7); cursor: not-allowed; }
+.tile.playable:active { transform: scale(0.92); }
+.tile.playable { box-shadow: 0 2px 6px rgba(255,215,0,0.5); }
+.btile { position: absolute; background: #f8f8f0; border-radius: 4px;
+  border: 1px solid #999; box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  display: flex; padding: 2px;
+  transition: transform 0.3s, top 0.3s, left 0.3s; }
+.btile .bhalf { flex: 1; position: relative; border-radius: 2px; }
+.btile .bhalf.left { border-right: 1px solid #ccc; }
+@keyframes handIn { 0%{transform:translateY(40px) scale(0.6);opacity:0}
+  100%{transform:translateY(0) scale(1);opacity:1} }
+.tile.new-in-hand { animation: handIn 0.3s ease-out; }
+@keyframes placeBoard { 0%{opacity:0;transform:scale(0.4)}
+  100%{opacity:1;transform:scale(1)} }
+.btile.placed { animation: placeBoard 0.35s ease-out; }
+.status.win { color: #ffd700; font-weight: bold; }
+.status.lose { color: #ff8888; font-weight: bold; }
+.pips { position: absolute; inset: 0; display: grid;
+  grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr);
+  padding: 2px; }
+.pip { width: 5px; height: 5px; background: #111; border-radius: 50%;
+  align-self: center; justify-self: center; }
+.toast { position: fixed; top: 50%; left: 50%;
+  transform: translate(-50%,-50%) scale(0.8); background: rgba(0,0,0,0.85);
+  color: #fff; padding: 12px 20px; border-radius: 12px; font-size: 14px;
+  text-align: center; opacity: 0; pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s; z-index: 100; max-width: 80vw; }
+.toast.show { opacity: 1; transform: translate(-50%,-50%) scale(1); }
+</style>
+</head>
+<body>
+<h1>🁫 Домино</h1>
+<div class="top-bar">
+<span>Раунд <span class="round" id="round">1</span></span>
+<span>Счёт: <span id="score">0 : 0</span></span>
+</div>
+<div class="board-wrap" id="boardWrap">
+<div class="board" id="board"></div>
+</div>
+<div class="status" id="status">Ваш ход</div>
+<div class="ai-info" id="aiInfo">У ИИ: 7 · Базар: 14</div>
+<div class="btn-row">
+<button class="btn" id="btnBazaar">Взять из базара</button>
+<button class="btn" id="btnPass" style="display:none">Пропустить</button>
+<button class="btn gold" id="btnNewGame" style="display:none">Новая игра</button>
+</div>
+<div class="hand" id="hand"></div>
+<div class="toast" id="toast"></div>
+<script>
+let deck=[],playerHand=[],aiHand=[],board=[];
+let currentTurn="player",gameOver=false,busy=false;
+let playerScore=0,aiScore=0,roundNumber=1,consecutivePasses=0;
+const boardWrap=document.getElementById("boardWrap");
+const boardEl=document.getElementById("board");
+const handEl=document.getElementById("hand");
+const statusEl=document.getElementById("status");
+const aiInfoEl=document.getElementById("aiInfo");
+const roundEl=document.getElementById("round");
+const scoreEl=document.getElementById("score");
+const toastEl=document.getElementById("toast");
+const btnBazaar=document.getElementById("btnBazaar");
+const btnPass=document.getElementById("btnPass");
+const btnNew=document.getElementById("btnNewGame");
+const GAP=2;
+function loadScore(){try{const s=JSON.parse(localStorage.getItem("domino_score")||"{}");
+playerScore=s.player||0;aiScore=s.ai||0;roundNumber=s.round||1;}catch(e){}}
+function saveScore(){try{localStorage.setItem("domino_score",JSON.stringify(
+{player:playerScore,ai:aiScore,round:roundNumber}));}catch(e){}}
+function createDeck(){const d=[];for(let a=0;a<=6;a++)for(let b=a;b<=6;b++)d.push([a,b]);return d;}
+function shuffle(arr){for(let i=arr.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));
+[arr[i],arr[j]]=[arr[j],arr[i]];}}
+function startRound(){
+deck=createDeck();shuffle(deck);
+playerHand=[];aiHand=[];board=[];
+for(let i=0;i<7;i++){playerHand.push(deck.pop());aiHand.push(deck.pop());}
+let starter="player",bestDbl=-1;
+playerHand.forEach(t=>{if(t[0]===t[1]&&t[0]>bestDbl){bestDbl=t[0];starter="player";}});
+aiHand.forEach(t=>{if(t[0]===t[1]&&t[0]>bestDbl){bestDbl=t[0];starter="ai";}});
+currentTurn=starter;gameOver=false;busy=false;consecutivePasses=0;
+statusEl.classList.remove("win","lose");
+roundEl.textContent=roundNumber;
+scoreEl.textContent=playerScore+" : "+aiScore;
+btnNew.style.display="none";
+render();renderHand(true);
+if(currentTurn==="ai"){busy=true;setTimeout(aiTurn,700);}
+}
+function leftEnd(){return board.length?board[0].outerLeft:null;}
+function rightEnd(){return board.length?board[board.length-1].outerRight:null;}
+function canPlay(tile){if(board.length===0)return true;
+const L=leftEnd(),R=rightEnd();
+return tile[0]===L||tile[1]===L||tile[0]===R||tile[1]===R;}
+function canPlayerMove(){return playerHand.some(canPlay);}
+function canAiMove(){return aiHand.some(canPlay);}
+function playTile(tile,hand,index){
+if(!canPlay(tile))return false;
+if(board.length===0){board.push({tile:tile,outerLeft:tile[0],outerRight:tile[1]});}
+else{const L=leftEnd(),R=rightEnd();
+if(tile[0]===L||tile[1]===L){const outer=(tile[0]===L)?tile[1]:tile[0];
+board.unshift({tile:tile,outerLeft:outer,outerRight:L});}
+else if(tile[0]===R||tile[1]===R){const outer=(tile[1]===R)?tile[0]:tile[1];
+board.push({tile:tile,outerLeft:R,outerRight:outer});}
+else return false;}
+hand.splice(index,1);consecutivePasses=0;return true;
+}
+function render(){
+renderBoard();renderHand();
+aiInfoEl.textContent="У ИИ: "+aiHand.length+" · Базар: "+deck.length;
+btnPass.style.display="none";
+if(gameOver){btnBazaar.style.display="none";
+btnNew.style.display="inline-block";return;}
+btnNew.style.display="none";
+if(currentTurn==="player"){
+if(canPlayerMove()){statusEl.textContent="Ваш ход";
+btnBazaar.style.display="inline-block";btnBazaar.disabled=true;}
+else if(deck.length>0){statusEl.textContent="Ходов нет — берите из базара";
+btnBazaar.style.display="inline-block";btnBazaar.disabled=false;}
+else{statusEl.textContent="Ходов нет";
+btnPass.style.display="inline-block";btnBazaar.style.display="none";}
+}else{statusEl.textContent="Ход ИИ...";btnBazaar.style.display="none";}
+}
+function renderBoard(){
+boardEl.innerHTML="";
+if(board.length===0){const e=document.createElement("div");
+e.className="board-empty";e.textContent="Стол пуст. Сделайте первый ход.";
+boardEl.appendChild(e);return;}
+const W=boardWrap.clientWidth,H=boardWrap.clientHeight,pad=4;
+let tileLen=58,tileW=29;
+const total=board.length;
+const fitsOne=(total*(tileLen+GAP))<=(W-pad*2);
+if(fitsOne){const rowW=total*(tileLen+GAP)-GAP;
+const x0=(W-rowW)/2,y0=(H-tileW)/2;
+for(let i=0;i<board.length;i++){const seg=board[i];
+const el=makeBoardTileEl(seg.outerLeft,seg.outerRight);
+el.classList.add("placed");
+el.style.left=(x0+i*(tileLen+GAP))+"px";el.style.top=y0+"px";
+el.style.width=tileLen+"px";el.style.height=tileW+"px";
+boardEl.appendChild(el);}return;}
+const perRow=Math.max(1,Math.floor((W-pad*2+GAP)/(tileLen+GAP)));
+const rows=Math.ceil(total/perRow);
+const availH=H-pad*2,rowH=tileW+GAP;
+if(rows*rowH>availH){const k=availH/(rows*rowH);tileLen*=k;tileW*=k;}
+const perRow2=Math.max(1,Math.floor((W-pad*2+GAP)/(tileLen+GAP)));
+for(let i=0;i<board.length;i++){const seg=board[i];
+const el=makeBoardTileEl(seg.outerLeft,seg.outerRight);
+el.classList.add("placed");
+const row=Math.floor(i/perRow2),col=i%perRow2;
+const cnt=Math.min(perRow2,total-row*perRow2);
+const rowW=cnt*(tileLen+GAP)-GAP;
+const x0=(W-rowW)/2;
+el.style.left=(x0+col*(tileLen+GAP))+"px";
+el.style.top=(pad+row*(tileW+GAP))+"px";
+el.style.width=tileLen+"px";el.style.height=tileW+"px";
+boardEl.appendChild(el);}
+}
+function makeBoardTileEl(l,r){
+const el=document.createElement("div");el.className="btile";
+const L=document.createElement("div");L.className="bhalf left";
+L.appendChild(makePips(l));
+const R=document.createElement("div");R.className="bhalf right";
+R.appendChild(makePips(r));
+el.appendChild(L);el.appendChild(R);return el;
+}
+function renderHand(anim){
+handEl.innerHTML="";
+playerHand.forEach((tile,i)=>{
+const ok=canPlay(tile)&&!gameOver&&currentTurn==="player";
+const el=makeTileEl(tile);
+if(anim)el.classList.add("new-in-hand");
+if(ok){el.classList.add("playable");
+el.addEventListener("click",()=>onTileClick(i));}
+else el.classList.add("disabled");
+handEl.appendChild(el);});
+}
+const PIP={0:[],1:[5],2:[1,9],3:[1,5,9],4:[1,3,7,9],5:[1,3,5,7,9],6:[1,3,4,6,7,9]};
+function makeTileEl(tile){
+const el=document.createElement("div");el.className="tile";
+const top=document.createElement("div");top.className="half top";
+top.appendChild(makePips(tile[0]));
+const bot=document.createElement("div");bot.className="half bottom";
+bot.appendChild(makePips(tile[1]));
+el.appendChild(top);el.appendChild(bot);return el;
+}
+function makePips(n){
+const w=document.createElement("div");w.className="pips";
+const pos=PIP[n]||[];
+for(let i=1;i<=9;i++){const c=document.createElement("div");
+if(pos.includes(i)){const p=document.createElement("div");
+p.className="pip";c.appendChild(p);}
+w.appendChild(c);}return w;
+}
+function onTileClick(index){
+if(gameOver||currentTurn!=="player"||busy)return;
+const tile=playerHand[index];
+if(!playTile(tile,playerHand,index))return;
+render();
+if(checkWin("player"))return;
+currentTurn="ai";statusEl.textContent="Ход ИИ...";
+busy=true;setTimeout(aiTurn,700);
+}
+btnBazaar.addEventListener("click",()=>{
+if(gameOver||currentTurn!=="player"||busy)return;
+if(canPlayerMove()){showToast("У вас есть ход");return;}
+if(deck.length===0){showToast("Базар пуст");render();return;}
+takeFromBazaar();
+});
+function takeFromBazaar(){
+if(deck.length===0){render();return;}
+const tile=deck.pop();playerHand.push(tile);renderHand();
+if(canPlay(tile)){showToast("Взяли "+tile[0]+"-"+tile[1]);
+render();}else{render();setTimeout(takeFromBazaar,350);}
+}
+btnPass.addEventListener("click",()=>{
+if(gameOver||currentTurn!=="player"||busy)return;
+if(deck.length>0){showToast("Сначала возьмите из базара");return;}
+if(canPlayerMove())return;
+passTurn("player");
+});
+function passTurn(who){
+consecutivePasses++;
+statusEl.textContent=(who==="player")?"Вы пропускаете":"ИИ пропускает";
+if(consecutivePasses>=2){endRound("fish");return;}
+setTimeout(()=>{
+currentTurn=(who==="player")?"ai":"player";busy=false;render();
+if(currentTurn==="ai"){busy=true;setTimeout(aiTurn,700);}
+},800);
+}
+function aiTurn(){
+if(gameOver){busy=false;return;}
+const playable=[];
+aiHand.forEach((t,i)=>{if(canPlay(t))playable.push(i);});
+if(playable.length===0){
+if(deck.length>0){const tile=deck.pop();aiHand.push(tile);
+render();setTimeout(aiTurn,400);return;}
+busy=false;passTurn("ai");return;
+}
+playable.sort((a,b)=>(aiHand[b][0]+aiHand[b][1])-(aiHand[a][0]+aiHand[a][1]));
+const idx=playable[0],tile=aiHand[idx];
+playTile(tile,aiHand,idx);render();
+if(checkWin("ai")){busy=false;return;}
+currentTurn="player";busy=false;render();
+}
+function checkWin(who){
+if(who==="player"&&playerHand.length===0){endRound("player");return true;}
+if(who==="ai"&&aiHand.length===0){endRound("ai");return true;}
+return false;
+}
+function endRound(res){
+gameOver=true;busy=false;
+if(res==="fish"){
+const p=playerHand.reduce((s,t)=>s+t[0]+t[1],0);
+const a=aiHand.reduce((s,t)=>s+t[0]+t[1],0);
+if(p<a){playerScore+=(a-p);statusEl.textContent="🐟 Рыба! Вы +"+(a-p);statusEl.classList.add("win");}
+else if(a<p){aiScore+=(p-a);statusEl.textContent="🐟 Рыба. ИИ +"+(p-a);statusEl.classList.add("lose");}
+else statusEl.textContent="🐟 Рыба! Ничья";
+}else if(res==="player"){
+const a=aiHand.reduce((s,t)=>s+t[0]+t[1],0);
+playerScore+=a;statusEl.textContent="🎉 Вы выиграли! +"+a+" очков";
+statusEl.classList.add("win");
+}else{
+const p=playerHand.reduce((s,t)=>s+t[0]+t[1],0);
+aiScore+=p;statusEl.textContent="🤖 ИИ выиграл (+"+p+")";
+statusEl.classList.add("lose");
+}
+scoreEl.textContent=playerScore+" : "+aiScore;
+saveScore();render();
+}
+btnNew.addEventListener("click",()=>{
+roundNumber++;saveScore();startRound();
+});
+let toastTimer=null;
+function showToast(text){
+toastEl.textContent=text;toastEl.classList.add("show");
+clearTimeout(toastTimer);
+toastTimer=setTimeout(()=>toastEl.classList.remove("show"),1400);
+}
+window.addEventListener("resize",()=>{if(board.length>0)renderBoard();});
+loadScore();startRound();
+</script>
+</body>
+</html>
