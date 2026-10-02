@@ -1,4 +1,19 @@
+# Бэкапы
 *.bak
+*.backup
+*.old
+
+# Логи
 *.log
-node_modules/
+
+# ОС
 .DS_Store
+Thumbs.db
+
+# Редакторы
+.vscode/
+.idea/
+*.swp
+
+# Node (на всякий случай)
+node_modules/
